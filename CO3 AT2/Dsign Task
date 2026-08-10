@@ -1,1 +1,98 @@
+%% MEC-Enabled Smart Traffic System - Short Simulation
+clear; close all; clc;
 
+% Parameters
+num_vehicles = 50;
+num_mec = 3;
+num_tasks = 3;
+sim_time = 30;
+
+% Latency models (seconds)
+latency_local = 0.015;          % Local processing
+latency_edge = 0.005;           % Edge processing  
+latency_cloud = 0.100;          % Cloud processing
+
+% Generate random vehicle positions (1000x1000m)
+vehicles = 1000 * rand(num_vehicles, 2);
+mec_pos = [200 200; 500 500; 800 800];
+
+% Simulate offloading decisions
+offload_local = 0;
+offload_edge = 0;
+offload_cloud = 0;
+edge_latency = zeros(num_vehicles, 1);
+cloud_latency = zeros(num_vehicles, 1);
+
+for v = 1:num_vehicles
+    for t = 1:num_tasks
+        % Calculate distance to nearest MEC
+        dist = min(sqrt(sum((vehicles(v,:) - mec_pos).^2, 2)));
+        
+        % Propagation delay
+        prop_delay = dist / 3e8;
+        
+        % Total latencies
+        edge_lat = latency_edge + prop_delay;
+        cloud_lat = latency_cloud + prop_delay;
+        
+        edge_latency(v) = edge_latency(v) + edge_lat;
+        cloud_latency(v) = cloud_latency(v) + cloud_lat;
+        
+        % Offloading decision (threshold-based)
+        if edge_lat < 0.020
+            offload_edge = offload_edge + 1;
+        elseif latency_local < 0.020
+            offload_local = offload_local + 1;
+        else
+            offload_cloud = offload_cloud + 1;
+        end
+    end
+end
+
+% Average latencies
+avg_edge = mean(edge_latency);
+avg_cloud = mean(cloud_latency);
+
+% Results Visualization
+figure('Position', [100 100 800 600]);
+
+subplot(2,2,1);
+bar([latency_local*1000, avg_edge*1000, avg_cloud*1000]);
+set(gca, 'XTickLabel', {'Local', 'MEC', 'Cloud'});
+ylabel('Latency (ms)');
+title('Average Latency Comparison');
+grid on;
+
+subplot(2,2,2);
+decisions = [offload_local, offload_edge, offload_cloud];
+pie(decisions, {'Local', 'MEC Edge', 'Cloud'});
+title('Offloading Decisions');
+
+subplot(2,2,3);
+plot(vehicles(:,1), vehicles(:,2), 'bo', 'MarkerSize', 6);
+hold on;
+plot(mec_pos(:,1), mec_pos(:,2), 'g^', 'MarkerSize', 12, 'LineWidth', 2);
+xlabel('X (m)'); ylabel('Y (m)');
+title('Vehicle and MEC Positions');
+legend('Vehicles', 'MEC Servers');
+grid on;
+
+subplot(2,2,4);
+improvement = (avg_cloud - avg_edge) / avg_cloud * 100;
+bar(improvement);
+ylabel('Latency Reduction (%)');
+title('MEC vs Cloud Performance');
+grid on;
+ylim([0 100]);
+text(1, improvement/2, sprintf('%.1f%%', improvement), ...
+    'HorizontalAlignment', 'center', 'FontSize', 12);
+
+sgtitle('MEC-Enabled Smart Traffic System');
+
+% Print stats
+fprintf('=== MEC Smart Traffic Results ===\n');
+fprintf('Local Latency: %.2f ms\n', latency_local*1000);
+fprintf('MEC Edge Latency: %.2f ms\n', avg_edge*1000);
+fprintf('Cloud Latency: %.2f ms\n', avg_cloud*1000);
+fprintf('Latency Reduction: %.1f%%\n', improvement);
+fprintf('MEC Offload: %.1f%%\n', offload_edge/sum(decisions)*100);
