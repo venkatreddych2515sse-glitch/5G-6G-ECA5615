@@ -1,1 +1,195 @@
+clear;
+clc;
+close all;
 
+txList = [2, 4, 8];
+mods = {'BPSK', 'QPSK', '16QAM'};
+
+SNR = 0:2:24;
+trials = 30;
+Nbits = 5000;
+
+colors = 'brm';
+markers = 'osd';
+leg = {};
+
+figure;
+hold on;
+grid on;
+
+for tx = txList
+
+    for m = 1:length(mods)
+
+        modType = mods{m};
+        ber = zeros(size(SNR));
+
+        for si = 1:length(SNR)
+
+            snr = SNR(si);
+            err = 0;
+            tot = 0;
+
+            for tr = 1:trials
+
+                % Generate random bits
+                bits = randi([0 1], 1, Nbits);
+
+                % =====================================================
+                % MODULATION
+                % =====================================================
+
+                if strcmp(modType, 'BPSK')
+
+                    sym = 2*bits - 1;
+
+                elseif strcmp(modType, 'QPSK')
+
+                    % Make number of bits even
+                    N = floor(length(bits)/2)*2;
+                    bits = bits(1:N);
+
+                    sym = (2*bits(1:2:end)-1) + ...
+                          1i*(2*bits(2:2:end)-1);
+
+                    sym = sym / sqrt(2);
+
+                else
+                    % 16-QAM
+                    % Make number of bits divisible by 4
+                    N = floor(length(bits)/4)*4;
+                    bits = bits(1:N);
+
+                    sym = qammod(bits, 16, ...
+                        'InputType', 'bit', ...
+                        'UnitAveragePower', true);
+                end
+
+                % =====================================================
+                % MIMO TRANSMISSION
+                % Spatial Multiplexing
+                % =====================================================
+
+                Nsym = length(sym);
+
+                % Number of symbols per transmit antenna
+                Ncol = floor(Nsym / tx);
+
+                if Ncol < 1
+                    continue;
+                end
+
+                % Keep only symbols that fit all transmit antennas
+                Nuse = tx * Ncol;
+
+                sym = sym(1:Nuse);
+
+                % Corresponding number of original bits
+                if strcmp(modType, 'BPSK')
+                    bits = bits(1:Nuse);
+
+                elseif strcmp(modType, 'QPSK')
+                    bits = bits(1:2*Nuse);
+
+                else
+                    bits = bits(1:4*Nuse);
+                end
+
+                % Arrange symbols into transmit antennas
+                X = reshape(sym, tx, Ncol);
+
+                % Rayleigh fading MIMO channel
+                H = (randn(tx,tx) + 1i*randn(tx,tx)) / sqrt(2);
+
+                % Received signal
+                Y = H * X;
+
+                % =====================================================
+                % AWGN NOISE
+                % =====================================================
+
+                noise = sqrt(10^(-snr/10)/2) * ...
+                    (randn(tx,Ncol) + 1i*randn(tx,Ncol));
+
+                Y = Y + noise;
+
+                % =====================================================
+                % MMSE DETECTION
+                % =====================================================
+
+                W = (H' * H + eye(tx) * 10^(-snr/10)) \ H';
+
+                symEst = W * Y;
+
+                % Convert detected symbols back into one stream
+                symEst = symEst(:).';
+
+                % =====================================================
+                % DEMODULATION
+                % =====================================================
+
+                if strcmp(modType, 'BPSK')
+
+                    bitsEst = real(symEst) > 0;
+                    bitsEst = bitsEst(:).';
+
+                elseif strcmp(modType, 'QPSK')
+
+                    bitsEst = zeros(1, 2*length(symEst));
+
+                    bitsEst(1:2:end) = real(symEst) > 0;
+                    bitsEst(2:2:end) = imag(symEst) > 0;
+
+                else
+                    % 16-QAM demodulation
+                    bitsEst = qamdemod(symEst, 16, ...
+                        'OutputType', 'bit', ...
+                        'UnitAveragePower', true);
+
+                    bitsEst = bitsEst(:).';
+                end
+
+                % =====================================================
+                % BER CALCULATION
+                % =====================================================
+
+                mLen = min(length(bits), length(bitsEst));
+
+                err = err + sum(bits(1:mLen) ~= bitsEst(1:mLen));
+                tot = tot + mLen;
+
+            end
+
+            % BER
+            ber(si) = err / tot;
+
+        end
+
+        % =============================================================
+        % PLOT
+        % =============================================================
+
+        leg{end+1} = sprintf('%dx%d %s', tx, tx, modType);
+
+        semilogy(SNR, ber, ...
+            [colors(m) markers(m) '-'], ...
+            'LineWidth', 1.5, ...
+            'MarkerSize', 6);
+
+    end
+end
+
+% ================================================================
+% GRAPH FORMATTING
+% ================================================================
+
+xlabel('SNR (dB)');
+ylabel('BER');
+title('MIMO BER Performance (Rayleigh Channel, MMSE Detection)');
+
+legend(leg, 'Location', 'southwest');
+
+axis([0 24 1e-4 1]);
+
+grid on;
+hold off;
